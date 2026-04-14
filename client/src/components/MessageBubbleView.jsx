@@ -1,145 +1,141 @@
+/**
+ * MessageBubbleView — Solace
+ * Dark-theme message rendering
+ */
+
 import React from 'react';
 
 const MOOD_LABELS = {
-  happy: 'Bright',
-  sad: 'Low',
-  anxious: 'Anxious',
-  angry: 'Tense',
-  stressed: 'Stressed',
-  hopeful: 'Hopeful',
-  confused: 'Unclear',
-  overwhelmed: 'Overwhelmed',
-  calm: 'Calm',
-  neutral: 'Steady'
+  happy:'Bright', sad:'Low', anxious:'Anxious', angry:'Tense',
+  stressed:'Stressed', hopeful:'Hopeful', confused:'Unclear',
+  overwhelmed:'Overwhelmed', calm:'Calm', neutral:'Steady',
 };
 
-const MessageBubbleView = ({
-  role,
-  content,
-  mood,
-  confidence,
-  timestamp,
-  resources,
-  riskLevel,
-  followUp,
-  safety
-}) => {
+const getMoodClass = (m) => {
+  const map = { calm:'calm',hopeful:'hopeful',neutral:'neutral',anxious:'anxious',sad:'sad',stressed:'stressed',angry:'angry',happy:'hopeful',overwhelmed:'stressed' };
+  return map[m] || '';
+};
+
+const riskBorder = (level) => {
+  const m = { low:'rgba(210,150,60,0.4)', medium:'rgba(200,110,50,0.45)', high:'rgba(190,60,40,0.5)', crisis:'rgba(170,30,20,0.6)' };
+  return m[level] || null;
+};
+
+const MessageBubbleView = ({ role, content, mood, confidence, timestamp, resources, riskLevel, followUp, safety }) => {
   const isUser = role === 'user';
 
-  const formatTime = (time) => {
-    if (!time) {
-      return '';
-    }
+  const fmtTime = (t) => t ? new Date(t).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }) : '';
+  const getMoodLabel = (m) => MOOD_LABELS[m] || 'Reflective';
 
-    const date = new Date(time);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  };
-
-  const getMoodLabel = (currentMood) => MOOD_LABELS[currentMood] || 'Reflective';
-
-  const getRiskLevelStyle = (level) => {
-    if (!level || level === 'none') {
-      return '';
-    }
-
-    const styles = {
-      low: 'border-[#e2b454]',
-      medium: 'border-[#d88742]',
-      high: 'border-[#cc5a3c]',
-      crisis: 'border-[#ab2d1b] bg-[#fff1eb]'
-    };
-
-    return styles[level] || '';
-  };
+  const borderColor = !isUser && riskLevel && riskLevel !== 'none' ? riskBorder(riskLevel) : null;
 
   return (
-    <div className={`mb-5 flex ${isUser ? 'justify-end' : 'justify-start'}`}>
-      <div className="max-w-[88%] md:max-w-[76%]">
-        {!isUser && (
-          <div className="mb-2 ml-2 flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#ecd5c4] text-[#8d5337] shadow-sm">
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="1.8"
-                  d="M12 5c4.5 0 7 3.2 7 7.2 0 4.5-3.2 6.8-7 6.8s-7-2.3-7-6.8C5 8.2 7.5 5 12 5Z"
-                />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M9.5 12.5h.01M14.5 12.5h.01M9.5 15.5c.9.7 1.7 1 2.5 1s1.6-.3 2.5-1" />
-              </svg>
-            </div>
-            <div>
-              <p className="ui-sans text-xs font-semibold uppercase tracking-[0.2em] text-[#8f6b55]">
-                Support companion
-              </p>
-              <p className="ui-sans text-xs text-[#a08470]">{formatTime(timestamp)}</p>
-            </div>
+    <div
+      className="anim-in"
+      style={{
+        display:'flex', flexDirection:'column',
+        alignItems: isUser ? 'flex-end' : 'flex-start',
+        marginBottom: 22, gap: 6,
+      }}
+    >
+      {/* Assistant avatar row */}
+      {!isUser && (
+        <div style={{ display:'flex', alignItems:'center', gap: 8, marginLeft: 2 }}>
+          <div
+            style={{
+              width: 28, height: 28, borderRadius: '50%',
+              background: 'var(--accent-bg)',
+              border: '1px solid rgba(200,168,130,0.22)',
+              display:'flex', alignItems:'center', justifyContent:'center',
+              color: 'var(--accent)', flexShrink: 0,
+            }}
+          >
+            <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
+              <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+            </svg>
           </div>
-        )}
+          <span className="t-label" style={{ fontSize:10, marginBottom:0 }}>Solace</span>
+          <span style={{ fontSize:11.5, color:'var(--text-faint)' }}>{fmtTime(timestamp)}</span>
+        </div>
+      )}
 
+      {/* Bubble */}
+      <div style={{ maxWidth:'min(84%,700px)' }}>
         <div
-          className={`rounded-2xl px-4 py-4 ${
-            isUser
-              ? 'warm-ring rounded-br-md bg-[linear-gradient(135deg,#bc6039,#8f4528)] text-[#fff8f1]'
-              : `warm-ring rounded-bl-md border bg-[#fffaf2] text-[#3f3128] ${getRiskLevelStyle(riskLevel)}`
-          }`}
+          className={isUser ? 'bubble-user' : 'bubble-assistant'}
+          style={{
+            padding:'14px 18px',
+            ...(borderColor ? { borderColor, borderWidth:2 } : {}),
+            ...(riskLevel === 'crisis' && !isUser ? { background:'rgba(170,30,20,0.12)' } : {}),
+          }}
         >
-          <p className={`whitespace-pre-wrap break-words ${isUser ? 'ui-sans text-[15px] leading-7' : 'text-[17px] leading-8'}`}>
+          <p
+            className="f-ui"
+            style={{
+              fontSize: isUser ? 15 : 15.5,
+              lineHeight: isUser ? 1.65 : 1.75,
+              color: isUser ? '#0d1017' : 'var(--text-body)',
+              whiteSpace:'pre-wrap', wordBreak:'break-word',
+            }}
+          >
             {content}
           </p>
 
+          {/* User mood inline */}
           {isUser && mood && (
-            <div className="ui-sans mt-3 border-t border-[rgba(255,248,241,0.2)] pt-3 text-xs text-[#f8dfcf]">
-              <span>
-                Mood: {getMoodLabel(mood)}
-                {confidence && ` (${(confidence * 100).toFixed(0)}%)`}
+            <div style={{ marginTop:10, paddingTop:10, borderTop:'1px solid rgba(13,16,23,0.15)', display:'flex', alignItems:'center', gap:6 }}>
+              <span style={{ fontSize:11.5, color:'rgba(13,16,23,0.55)', fontWeight:500 }}>Mood detected:</span>
+              <span style={{ fontSize:11.5, color:'rgba(13,16,23,0.75)', fontWeight:600 }}>
+                {getMoodLabel(mood)}{confidence ? ` · ${(confidence*100).toFixed(0)}%` : ''}
               </span>
             </div>
           )}
 
-          {!isUser && resources && resources.length > 0 && (
-            <div className="mt-4 border-t border-[rgba(120,87,48,0.12)] pt-4">
-              <p className="ui-sans mb-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#8f6b55]">
-                Helpful Resources
-              </p>
-              {resources.map((resource, index) => (
-                <div key={index} className="ui-sans mb-2 rounded-2xl bg-[#f6efe7] px-3 py-2 text-sm text-[#5f4a3b]">
-                  <span className="font-medium">{resource.name}</span>
-                  {resource.contact ? <span className="ml-1">- {resource.contact}</span> : null}
-                </div>
-              ))}
+          {/* Resources */}
+          {!isUser && resources?.length > 0 && (
+            <div style={{ marginTop:14, paddingTop:12, borderTop:'1px solid var(--border-faint)' }}>
+              <p className="t-label" style={{ marginBottom:8 }}>Helpful resources</p>
+              <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                {resources.map((r, i) => (
+                  <div key={i} className="card-inset" style={{ padding:'9px 13px', fontSize:13.5 }}>
+                    <span style={{ fontWeight:600, color:'var(--text-body)' }}>{r.name}</span>
+                    {r.contact && <span style={{ color:'var(--text-muted)', marginLeft:6 }}>— {r.contact}</span>}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 
-          {!isUser && (followUp || safety) && (
-            <div className="mt-4 space-y-3 border-t border-[rgba(120,87,48,0.12)] pt-4 text-sm text-[#5f4a3b]">
+          {/* Follow-up & safety */}
+          {!isUser && (followUp || (safety?.riskLevel && safety.riskLevel !== 'none')) && (
+            <div style={{ marginTop:14, paddingTop:12, borderTop:'1px solid var(--border-faint)', display:'flex', flexDirection:'column', gap:8 }}>
               {safety?.riskLevel && safety.riskLevel !== 'none' && (
-                <div className="ui-sans rounded-2xl bg-[#fff2df] px-3 py-2">
-                  <span className="font-medium text-[#7a4d1f]">Safety:</span>{' '}
-                  <span className="capitalize">{safety.riskLevel}</span>
-                  {safety.needsAttention ? ' attention required' : ''}
+                <div style={{ padding:'9px 13px', borderRadius:'var(--r-sm)', background:'var(--status-danger)', border:'1px solid rgba(190,70,60,0.22)', fontSize:13.5, color:'var(--status-danger-text)' }}>
+                  <span style={{ fontWeight:600 }}>Safety: </span>
+                  <span style={{ textTransform:'capitalize' }}>{safety.riskLevel}</span>
+                  {safety.needsAttention ? ' — please reach out for support' : ''}
                 </div>
               )}
-
               {followUp && (
-                <div className="ui-sans rounded-2xl bg-[#eef4eb] px-3 py-3 text-[#355146]">
-                  <span className="font-medium">A gentle next step:</span> {followUp}
+                <div style={{ padding:'9px 13px', borderRadius:'var(--r-sm)', background:'var(--sage-bg)', border:'1px solid rgba(107,143,113,0.20)', fontSize:13.5, color:'var(--sage-bright)' }}>
+                  <span style={{ fontWeight:600 }}>A gentle next step: </span>
+                  <span style={{ color:'var(--text-muted)' }}>{followUp}</span>
                 </div>
               )}
             </div>
           )}
         </div>
 
-        {isUser ? (
-          <div className="ui-sans mr-2 mt-2 text-right text-xs text-[#9e8574]">{formatTime(timestamp)}</div>
-        ) : (
-          <div className="ui-sans mt-2 ml-2 flex items-center gap-2 text-xs text-[#9e8574]">
-            {mood ? (
-              <span className="rounded-full bg-[#f4ebdf] px-2 py-1">
-                Mood: {getMoodLabel(mood)}
-              </span>
-            ) : null}
+        {/* Below-bubble metadata */}
+        {!isUser && mood && (
+          <div style={{ marginTop:6, marginLeft:4, display:'flex', alignItems:'center', gap:6 }}>
+            <span className={`mood-tag ${getMoodClass(mood)}`}>{getMoodLabel(mood)}</span>
           </div>
+        )}
+        {isUser && (
+          <p style={{ marginTop:5, textAlign:'right', marginRight:4, fontSize:11.5, color:'var(--text-faint)' }}>
+            {fmtTime(timestamp)}
+          </p>
         )}
       </div>
     </div>

@@ -1,312 +1,549 @@
 /**
- * Chat Page Component
- * Main chat interface with message history and mood tracking
+ * Chat Page — Solace
+ * Full-viewport conversation workspace
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import ChatBoxView from '../components/ChatBoxView';
-import { getMoodHistory } from '../services/api';
+import { getChat, getChatHistory, getMoodHistory } from '../services/api';
 
 const QUICK_PROMPTS = [
-  'I am carrying too much at once and need help slowing down',
+  'I\'m carrying too much at once and need help slowing down',
   'Can you help me calm racing thoughts before bed?',
-  'I want a gentle plan for getting through today'
+  'I want a gentle plan for getting through today',
 ];
 
 const MOOD_LABELS = {
-  happy: 'Bright',
-  sad: 'Low',
-  anxious: 'Anxious',
-  angry: 'Tense',
-  stressed: 'Stressed',
-  hopeful: 'Hopeful',
-  confused: 'Unclear',
-  overwhelmed: 'Overwhelmed',
-  calm: 'Calm',
-  neutral: 'Steady'
+  happy:'Bright', sad:'Low', anxious:'Anxious', angry:'Tense',
+  stressed:'Stressed', hopeful:'Hopeful', confused:'Unclear',
+  overwhelmed:'Overwhelmed', calm:'Calm', neutral:'Steady',
 };
 
+const getMoodClass = (m) => {
+  const map = { calm:'calm',hopeful:'hopeful',neutral:'neutral',anxious:'anxious',sad:'sad',stressed:'stressed',angry:'angry',happy:'hopeful',overwhelmed:'stressed' };
+  return map[m] || '';
+};
+
+const mapMsg = (m) => ({
+  role: m.role, content: m.content, timestamp: m.timestamp,
+  mood: m.detectedMood || null, confidence: m.moodConfidence || null,
+  riskLevel: m.safetyFlag ? 'flagged' : 'none',
+});
+
+const fmtDate = (v) => {
+  if (!v) return '';
+  const d = new Date(v), now = new Date();
+  if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+  const diff = Math.floor((now - d) / 86400000);
+  if (diff === 1) return 'Yesterday';
+  if (diff < 7) return `${diff}d ago`;
+  return d.toLocaleDateString([], { day:'2-digit', month:'short' });
+};
+
+const SideLabel = ({ children, action }) => (
+  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: 12 }}>
+    <p className="t-label">{children}</p>
+    {action}
+  </div>
+);
+
 const Chat = () => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
   const navigate = useNavigate();
 
-  const [messages, setMessages] = useState([]);
-  const [chatId, setChatId] = useState(null);
-  const [activeTab, setActiveTab] = useState('chat');
-  const [moodHistory, setMoodHistory] = useState([]);
+  const [messages, setMessages]           = useState([]);
+  const [chatId, setChatId]               = useState(null);
+  const [activeTab, setActiveTab]         = useState('chat');
+  const [moodHistory, setMoodHistory]     = useState([]);
+  const [chatHistory, setChatHistory]     = useState([]);
+  const [isLoadingChat, setIsLoadingChat] = useState(true);
+  const [isLoadingHist, setIsLoadingHist] = useState(false);
+
+  const storageKey = useMemo(() => user?.id ? `activeChatId:${user.id}` : null, [user?.id]);
+
+  useEffect(() => { if (!isAuthenticated) navigate('/'); }, [isAuthenticated, navigate]);
 
   useEffect(() => {
-    if (!isAuthenticated) {
-      navigate('/');
-    }
-  }, [isAuthenticated, navigate]);
-
-  useEffect(() => {
-    const fetchMoodHistory = async () => {
-      try {
-        const response = await getMoodHistory(7);
-        if (response.success) {
-          setMoodHistory(response.data.distribution || []);
-        }
-      } catch (err) {
-        console.error('Failed to fetch mood history:', err);
-      }
-    };
-
-    if (isAuthenticated) {
-      fetchMoodHistory();
-    }
+    if (!isAuthenticated) return;
+    getMoodHistory(7).then(r => { if (r.success) setMoodHistory(r.data.distribution || []); }).catch(() => {});
   }, [isAuthenticated]);
 
-  const handleNewMessage = (message) => {
-    setMessages((prev) => [...prev, message]);
-  };
+  const fetchHistory = useCallback(async (limit = 20) => {
+    if (!isAuthenticated) return [];
+    setIsLoadingHist(true);
+    try {
+      const r = await getChatHistory(limit);
+      const chats = r?.data?.chats || [];
+      setChatHistory(chats); return chats;
+    } catch (_) { setChatHistory([]); return []; }
+    finally { setIsLoadingHist(false); }
+  }, [isAuthenticated]);
 
-  const handleChatIdChange = (id) => {
-    setChatId(id);
+  useEffect(() => {
+    if (!isAuthenticated || !user?.id) { setIsLoadingChat(false); return; }
+    setIsLoadingChat(true);
+    (async () => {
+      try {
+        const chats = await fetchHistory(20);
+        const storedId = storageKey ? localStorage.getItem(storageKey) : null;
+        const targetId = storedId || chats[0]?.id || null;
+        if (!targetId) { setMessages([]); setChatId(null); return; }
+        const r = await getChat(targetId);
+        setChatId(targetId);
+        setMessages((r?.data?.messages || []).map(mapMsg));
+        if (storageKey) localStorage.setItem(storageKey, targetId);
+      } catch (_) {
+        if (storageKey) localStorage.removeItem(storageKey);
+        setMessages([]); setChatId(null);
+      } finally { setIsLoadingChat(false); }
+    })();
+  }, [storageKey, fetchHistory, isAuthenticated, user?.id]);
+
+  const handleNewMessage    = (m) => setMessages(p => [...p, m]);
+  const handleChatIdChange  = (id) => { setChatId(id); if (storageKey && id) localStorage.setItem(storageKey, id); };
+  const handlePersisted     = async () => { await fetchHistory(20); };
+
+  const handleSelectChat = async (id) => {
+    if (!id || id === chatId) { setActiveTab('chat'); return; }
+    setIsLoadingChat(true);
+    try {
+      const r = await getChat(id);
+      setChatId(id);
+      setMessages((r?.data?.messages || []).map(mapMsg));
+      setActiveTab('chat');
+      if (storageKey) localStorage.setItem(storageKey, id);
+    } catch (_) {}
+    finally { setIsLoadingChat(false); }
   };
 
   const startNewChat = () => {
-    setMessages([]);
-    setChatId(null);
-    setActiveTab('chat');
+    setMessages([]); setChatId(null); setActiveTab('chat');
+    if (storageKey) localStorage.removeItem(storageKey);
   };
 
-  const loadPrompt = (prompt) => {
-    setActiveTab('chat');
-    setMessages([]);
-    setChatId(null);
-    window.dispatchEvent(new CustomEvent('chat:set-input', { detail: prompt }));
+  const loadPrompt = (p) => {
+    setActiveTab('chat'); setMessages([]); setChatId(null);
+    window.dispatchEvent(new CustomEvent('chat:set-input', { detail: p }));
   };
 
-  const getMoodLabel = (mood) => MOOD_LABELS[mood] || 'Reflective';
+  if (!isAuthenticated) return null;
 
-  if (!isAuthenticated) {
-    return null;
+  if (isLoadingChat) {
+    return (
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'calc(100vh - 62px)', background:'var(--bg-base)' }}>
+        <div style={{ textAlign:'center' }}>
+          <div className="spinner" style={{ margin:'0 auto 16px' }} />
+          <p style={{ fontSize:15, color:'var(--text-muted)' }}>Restoring your conversation…</p>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="min-h-screen px-3 pb-4 pt-3 md:px-5 md:pb-6 md:pt-4">
-      <div className="mx-auto flex min-h-[calc(100vh-2rem)] max-w-[1500px] flex-col gap-4">
-        <section className="soft-panel overflow-hidden rounded-[28px] px-5 py-5 md:px-8 md:py-7">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-            <div className="max-w-3xl">
-              <p className="ui-sans text-xs font-semibold uppercase tracking-[0.3em] text-[#8f6b55]">
-                Guided Support Space
-              </p>
-              <h1 className="serif-display mt-3 text-4xl leading-tight text-[#2f241c] md:text-5xl">
-                A calmer place to sort through what feels heavy.
-              </h1>
-              <p className="ui-sans mt-4 max-w-2xl text-sm leading-7 text-[#6a5546] md:text-base">
-                This conversation space is designed to feel gentle, readable, and private.
-                Gemini powers the reflective parts of the orchestrator behind the scenes,
-                while the interface stays focused on what actually helps in the moment.
-              </p>
-            </div>
+    <div
+      style={{
+        height: 'calc(100vh - 62px)',
+        background: 'var(--bg-base)',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}
+    >
+      {/* ── Workspace header ──────────────────────────────── */}
+      <div
+        style={{
+          background: 'var(--bg-raised)',
+          borderBottom: '1px solid var(--border-faint)',
+          padding: '16px 28px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexShrink: 0,
+          gap: 20,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div>
+          <p className="t-label" style={{ marginBottom: 5 }}>Conversation workspace</p>
+          <h1
+            className="f-display"
+            style={{ fontSize: 'clamp(20px, 2.5vw, 28px)', color: 'var(--text-primary)', lineHeight: 1.2 }}
+          >
+            {chatId ? 'Active session' : 'Start a new conversation'}
+          </h1>
+        </div>
 
-            <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[420px]">
-              <div className="soft-card rounded-2xl px-4 py-4">
-                <p className="ui-sans text-[11px] uppercase tracking-[0.24em] text-[#8f6b55]">Recent moods</p>
-                <p className="serif-display mt-2 text-3xl text-[#2f241c]">
-                  {Array.isArray(moodHistory) ? moodHistory.length : 0}
-                </p>
-                <p className="ui-sans mt-1 text-xs text-[#6a5546]">Patterns from the last 7 days</p>
-              </div>
-
-              <div className="soft-card rounded-2xl px-4 py-4">
-                <p className="ui-sans text-[11px] uppercase tracking-[0.24em] text-[#8f6b55]">Support style</p>
-                <p className="serif-display mt-2 text-2xl text-[#2f241c]">Warm, practical</p>
-                <p className="ui-sans mt-1 text-xs text-[#6a5546]">Built for steady, reflective replies</p>
-              </div>
-
-              <div className="soft-card rounded-2xl px-4 py-4">
-                <p className="ui-sans text-[11px] uppercase tracking-[0.24em] text-[#8f6b55]">Immediate help</p>
-                <p className="serif-display mt-2 text-2xl text-[#2f241c]">988</p>
-                <p className="ui-sans mt-1 text-xs text-[#6a5546]">Use crisis support if safety is urgent</p>
-              </div>
-            </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {/* Quick stats */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 20,
+              padding: '9px 20px',
+              background: 'var(--bg-elevated)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--r-md)',
+            }}
+          >
+            {[
+              { label: 'Patterns', value: moodHistory.length || '—' },
+              { label: 'Sessions', value: chatHistory.length || '—' },
+              { label: 'Crisis line', value: '988', accent: true },
+            ].map(({ label, value, accent }, i) => (
+              <React.Fragment key={label}>
+                {i > 0 && <div style={{ width: 1, height: 28, background: 'var(--border-faint)' }} />}
+                <div style={{ textAlign: 'center' }}>
+                  <p className="t-label" style={{ marginBottom: 3 }}>{label}</p>
+                  <p className="f-display" style={{ fontSize: 20, lineHeight: 1, color: accent ? 'var(--accent)' : 'var(--text-primary)' }}>
+                    {value}
+                  </p>
+                </div>
+              </React.Fragment>
+            ))}
           </div>
-        </section>
 
-        <div className="grid flex-1 gap-4 xl:grid-cols-[280px_minmax(0,1fr)_300px]">
-          <aside className="soft-panel hidden rounded-[26px] p-4 xl:block">
+          {/* Mobile tabs */}
+          <div className="mobile-tabs" style={{ display:'none', gap: 6 }}>
+            {['chat','mood'].map(tab => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className="btn f-ui"
+                style={{
+                  padding: '7px 16px',
+                  fontSize: 13,
+                  fontWeight: activeTab === tab ? 600 : 400,
+                  background: activeTab === tab ? 'var(--accent)' : 'var(--bg-elevated)',
+                  color: activeTab === tab ? '#0d1017' : 'var(--text-muted)',
+                  borderRadius: 99,
+                  border: '1px solid var(--border-subtle)',
+                }}
+              >
+                {tab === 'chat' ? 'Chat' : 'Mood'}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Three-column body ─────────────────────────────── */}
+      <div
+        style={{
+          flex: 1,
+          display: 'grid',
+          gridTemplateColumns: '268px minmax(0,1fr) 288px',
+          gap: 0,
+          minHeight: 0,
+          overflow: 'hidden',
+        }}
+        className="chat-layout"
+      >
+        {/* ── Left sidebar ─────────────────────────────── */}
+        <aside
+          className="chat-sidebar"
+          style={{
+            borderRight: '1px solid var(--border-faint)',
+            background: 'var(--bg-raised)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
+          {/* New chat */}
+          <div style={{ padding: '18px 18px 14px', borderBottom: '1px solid var(--border-faint)', flexShrink: 0 }}>
             <button
               onClick={startNewChat}
-              className="ui-sans warm-ring flex w-full items-center justify-center gap-2 rounded-2xl bg-[#b65c36] px-4 py-3 text-sm font-semibold text-[#fffaf5] hover:bg-[#a54f2c]"
+              className="btn btn-primary f-ui"
+              style={{ width: '100%', padding: '11px 16px', fontSize: 14, borderRadius: 'var(--r-md)' }}
             >
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+              <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" viewBox="0 0 24 24">
+                <path d="M12 5v14M5 12h14"/>
               </svg>
-              <span>Start a fresh conversation</span>
+              New conversation
             </button>
+          </div>
 
-            <div className="mt-5 rounded-3xl bg-[#f9f2ea] p-4">
-              <p className="ui-sans text-[11px] font-semibold uppercase tracking-[0.24em] text-[#8f6b55]">
-                Conversation cues
-              </p>
-              <div className="mt-3 space-y-2">
-                {QUICK_PROMPTS.map((prompt) => (
+          {/* Conversation list */}
+          <div style={{ flex: 1, overflowY: 'auto', padding: '16px 14px' }}>
+            <SideLabel action={
+              <button
+                onClick={() => fetchHistory(20)}
+                className="f-ui"
+                style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-faint)', background: 'none', border: 'none', cursor: 'pointer', padding: '2px 6px', letterSpacing: '0.04em', textTransform: 'uppercase' }}
+              >
+                Refresh
+              </button>
+            }>
+              History
+            </SideLabel>
+
+            {isLoadingHist ? (
+              <div style={{ display:'flex', justifyContent:'center', padding:'20px 0' }}>
+                <div className="spinner" />
+              </div>
+            ) : chatHistory.length > 0 ? (
+              <div style={{ display:'flex', flexDirection:'column', gap: 2 }}>
+                {chatHistory.map(chat => (
                   <button
-                    key={prompt}
-                    onClick={() => loadPrompt(prompt)}
-                    className="ui-sans block w-full rounded-2xl border border-[#ead8c9] bg-white px-3 py-3 text-left text-sm leading-6 text-[#5f4a3b] hover:border-[#d8b49e] hover:bg-[#fffdf9]"
+                    key={chat.id}
+                    onClick={() => handleSelectChat(chat.id)}
+                    className={`convo-item${chat.id === chatId ? ' active' : ''}`}
                   >
-                    {prompt}
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap: 8 }}>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <p style={{
+                          fontSize: 13.5,
+                          fontWeight: chat.id === chatId ? 600 : 500,
+                          color: chat.id === chatId ? 'var(--text-primary)' : 'var(--text-body)',
+                          whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis',
+                          marginBottom: 3,
+                        }}>
+                          {chat.title || 'Untitled conversation'}
+                        </p>
+                        <p style={{ fontSize: 12, color: 'var(--text-faint)' }}>{chat.messageCount} messages</p>
+                      </div>
+                      <span style={{ fontSize: 11.5, color: 'var(--text-faint)', flexShrink: 0 }}>
+                        {fmtDate(chat.lastMessage || chat.createdAt)}
+                      </span>
+                    </div>
                   </button>
                 ))}
               </div>
-            </div>
-
-            <div className="mt-5 soft-card rounded-3xl p-4">
-              <p className="ui-sans text-[11px] font-semibold uppercase tracking-[0.24em] text-[#8f6b55]">
-                Recent mood rhythm
+            ) : (
+              <p style={{ fontSize: 13.5, color: 'var(--text-faint)', lineHeight: 1.7 }}>
+                Saved conversations will appear here once you begin chatting.
               </p>
+            )}
+          </div>
+
+          {/* Conversation cues */}
+          <div style={{ padding: '14px 14px 18px', borderTop: '1px solid var(--border-faint)', flexShrink: 0 }}>
+            <SideLabel>Cues</SideLabel>
+            <div style={{ display:'flex', flexDirection:'column', gap: 6 }}>
+              {QUICK_PROMPTS.map(p => (
+                <button
+                  key={p}
+                  onClick={() => loadPrompt(p)}
+                  className="f-ui"
+                  style={{
+                    padding: '9px 12px',
+                    borderRadius: 'var(--r-md)',
+                    fontSize: 13,
+                    color: 'var(--text-muted)',
+                    background: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-faint)',
+                    textAlign: 'left',
+                    lineHeight: 1.55,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s var(--ease)',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = 'var(--bg-overlay)'; e.currentTarget.style.borderColor = 'var(--border-subtle)'; e.currentTarget.style.color = 'var(--text-body)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = 'var(--bg-elevated)'; e.currentTarget.style.borderColor = 'var(--border-faint)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
+                >
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+        </aside>
+
+        {/* ── Chat surface ──────────────────────────────── */}
+        <main
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            minHeight: 0,
+            overflow: 'hidden',
+            background: 'var(--bg-base)',
+          }}
+        >
+          {/* Chat sub-header */}
+          <div
+            style={{
+              padding: '14px 28px',
+              borderBottom: '1px solid var(--border-faint)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexShrink: 0,
+              background: 'var(--bg-base)',
+            }}
+          >
+            <div>
+              <p className="t-label" style={{ marginBottom: 4 }}>Private chat</p>
+              <p className="f-display" style={{ fontSize: 18, color: 'var(--text-primary)', lineHeight: 1.2 }}>
+                {chatId ? 'Continuing your session' : 'New thread'}
+              </p>
+            </div>
+            {chatId && (
+              <button onClick={startNewChat} className="btn btn-ghost f-ui" style={{ fontSize: 13.5 }}>
+                + New thread
+              </button>
+            )}
+          </div>
+
+          {/* Chat body */}
+          {activeTab === 'mood' ? (
+            <div style={{ flex:1, overflowY:'auto', padding:'28px 36px' }}>
+              <p className="t-label" style={{ marginBottom: 12 }}>Mood history · 7 days</p>
+              <h2 className="f-display t-h2" style={{ marginBottom: 28, color: 'var(--text-primary)' }}>
+                A softer view of recent emotional patterns.
+              </h2>
               {moodHistory.length > 0 ? (
-                <div className="mt-4 space-y-3">
-                  {moodHistory.slice(0, 6).map((item, index) => (
-                    <div key={index} className="flex items-center justify-between rounded-2xl bg-[#fffaf2] px-3 py-2">
-                      <span className="ui-sans flex items-center gap-2 text-sm text-[#4f3f32]">
-                        <span className="rounded-full bg-[#f0e4d8] px-2 py-1 text-xs font-semibold text-[#7e624f]">
-                          {getMoodLabel(item._id)}
-                        </span>
-                        <span className="capitalize">{item._id}</span>
-                      </span>
-                      <span className="ui-sans text-xs font-semibold text-[#8f6b55]">{item.count}</span>
+                <div style={{ display:'flex', flexDirection:'column', gap: 12, maxWidth: 640 }}>
+                  {moodHistory.map((item, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        display:'flex', alignItems:'center', justifyContent:'space-between',
+                        padding:'14px 20px', borderRadius:'var(--r-lg)',
+                        background:'var(--bg-raised)', border:'1px solid var(--border-subtle)',
+                      }}
+                    >
+                      <div style={{ display:'flex', alignItems:'center', gap: 12 }}>
+                        <span className={`mood-tag ${getMoodClass(item._id)}`}>{MOOD_LABELS[item._id] || item._id}</span>
+                        <p style={{ fontSize:15, fontWeight:500, color:'var(--text-primary)', textTransform:'capitalize' }}>{item._id}</p>
+                      </div>
+                      <div style={{ textAlign:'right' }}>
+                        <p style={{ fontSize:15, fontWeight:600, color:'var(--text-body)' }}>{item.count} entries</p>
+                        <p style={{ fontSize:12.5, color:'var(--text-faint)', marginTop:3 }}>
+                          {((item.avgConfidence || 0.5) * 100).toFixed(0)}% confidence
+                        </p>
+                      </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <p className="ui-sans mt-3 text-sm leading-6 text-[#6a5546]">
-                  Mood patterns will appear here once you have a few conversations.
+                <p style={{ fontSize:15, color:'var(--text-faint)', lineHeight:1.75 }}>
+                  No mood history yet. Once you start chatting, emotional patterns will surface here.
                 </p>
               )}
             </div>
-          </aside>
+          ) : (
+            <ChatBoxView
+              chatId={chatId}
+              messages={messages}
+              onNewMessage={handleNewMessage}
+              onChatIdChange={handleChatIdChange}
+              onConversationPersisted={handlePersisted}
+            />
+          )}
+        </main>
 
-          <main className="soft-panel flex min-h-[72vh] flex-col overflow-hidden rounded-[30px]">
-            <div className="border-b border-[rgba(120,87,48,0.12)] px-4 py-4 md:px-6">
-              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <p className="ui-sans text-xs font-semibold uppercase tracking-[0.24em] text-[#8f6b55]">
-                    Private Chat
-                  </p>
-                  <h2 className="serif-display mt-1 text-2xl text-[#2f241c]">
-                    Let the conversation unfold at your pace.
-                  </h2>
-                </div>
+        {/* ── Right panel ───────────────────────────────── */}
+        <aside
+          className="right-panel"
+          style={{
+            borderLeft: '1px solid var(--border-faint)',
+            background: 'var(--bg-raised)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
+          <div style={{ flex:1, overflowY:'auto', padding: '20px 18px', display:'flex', flexDirection:'column', gap: 18 }}>
 
-                <div className="flex gap-2 md:hidden">
-                  <button
-                    onClick={() => setActiveTab('chat')}
-                    className={`ui-sans rounded-full px-4 py-2 text-sm ${
-                      activeTab === 'chat' ? 'bg-[#b65c36] text-white' : 'bg-[#efe4d8] text-[#6a5546]'
-                    }`}
-                  >
-                    Chat
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('mood')}
-                    className={`ui-sans rounded-full px-4 py-2 text-sm ${
-                      activeTab === 'mood' ? 'bg-[#b65c36] text-white' : 'bg-[#efe4d8] text-[#6a5546]'
-                    }`}
-                  >
-                    Mood
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {activeTab === 'chat' ? (
-              <ChatBoxView
-                chatId={chatId}
-                messages={messages}
-                onNewMessage={handleNewMessage}
-                onChatIdChange={handleChatIdChange}
-              />
-            ) : (
-              <div className="flex-1 overflow-y-auto p-4 md:p-6">
-                <div className="soft-card rounded-[28px] p-5 md:p-6">
-                  <p className="ui-sans text-[11px] font-semibold uppercase tracking-[0.24em] text-[#8f6b55]">
-                    Mood history
-                  </p>
-                  <h3 className="serif-display mt-2 text-3xl text-[#2f241c]">
-                    A softer view of your recent emotional patterns.
-                  </h3>
-                  {moodHistory.length > 0 ? (
-                    <div className="mt-6 grid gap-3">
-                      {moodHistory.map((item, index) => (
-                        <div
-                          key={index}
-                          className="flex items-center justify-between rounded-3xl border border-[rgba(120,87,48,0.1)] bg-[#fffaf2] px-4 py-4"
-                        >
-                          <span className="flex items-center gap-3">
-                            <span className="rounded-full bg-[#f0e4d8] px-2 py-1 text-xs font-semibold text-[#7e624f]">
-                              {getMoodLabel(item._id)}
-                            </span>
-                            <span>
-                              <span className="ui-sans block text-sm font-semibold capitalize text-[#4f3f32]">
-                                {item._id}
-                              </span>
-                              <span className="ui-sans text-xs text-[#8f6b55]">Seen across recent chats</span>
-                            </span>
-                          </span>
-                          <div className="text-right">
-                            <p className="ui-sans text-sm font-semibold text-[#4f3f32]">{item.count} entries</p>
-                            <p className="ui-sans text-xs text-[#8f6b55]">
-                              Avg confidence {((item.avgConfidence || 0.5) * 100).toFixed(0)}%
-                            </p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="ui-sans mt-5 text-sm leading-7 text-[#6a5546]">
-                      No mood history yet. Once you start chatting, this space will quietly track broad emotional patterns.
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-          </main>
-
-          <aside className="soft-panel hidden rounded-[26px] p-4 lg:block">
-            <div className="soft-card rounded-[28px] p-5">
-              <p className="ui-sans text-[11px] font-semibold uppercase tracking-[0.24em] text-[#8f6b55]">
-                Gentle guide
+            {/* Anchors */}
+            <div>
+              <SideLabel>Gentle anchors</SideLabel>
+              <p className="f-display" style={{ fontSize: 20, color:'var(--text-primary)', marginBottom: 14, lineHeight: 1.3 }}>
+                Small holds for a difficult moment.
               </p>
-              <h3 className="serif-display mt-2 text-2xl text-[#2f241c]">Small anchors for a difficult day.</h3>
-              <ul className="ui-sans mt-5 space-y-3 text-sm leading-6 text-[#5f4a3b]">
-                <li className="rounded-2xl bg-[#fffaf2] px-3 py-3">Pause for one slower breath than feels natural.</li>
-                <li className="rounded-2xl bg-[#fffaf2] px-3 py-3">Name the hardest part of today in one sentence.</li>
-                <li className="rounded-2xl bg-[#fffaf2] px-3 py-3">Choose one tiny action that lowers pressure by 5%.</li>
-              </ul>
+              <div style={{ display:'flex', flexDirection:'column', gap: 8 }}>
+                {[
+                  'Pause for one slower breath than feels natural.',
+                  'Name the hardest part of today in one sentence.',
+                  'Choose one tiny action that lowers pressure by 5%.',
+                ].map((tip, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      padding:'11px 14px',
+                      borderRadius:'var(--r-md)',
+                      background:'var(--bg-elevated)',
+                      border:'1px solid var(--border-faint)',
+                      fontSize: 13.5,
+                      color:'var(--text-muted)',
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    {tip}
+                  </div>
+                ))}
+              </div>
             </div>
 
-            <div className="mt-4 rounded-[28px] bg-[linear-gradient(145deg,#dce6dc,#f3e2d6)] p-[1px]">
-              <div className="rounded-[27px] bg-[#fffaf4] p-5">
-                <p className="ui-sans text-[11px] font-semibold uppercase tracking-[0.24em] text-[#8f6b55]">
-                  Support now
+            <div style={{ borderTop:'1px solid var(--border-faint)' }} />
+
+            {/* Mood summary */}
+            <div>
+              <SideLabel>Recent mood</SideLabel>
+              {moodHistory.length > 0 ? (
+                <div style={{ display:'flex', flexDirection:'column', gap: 7 }}>
+                  {moodHistory.slice(0,5).map((item, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        display:'flex', alignItems:'center', justifyContent:'space-between',
+                        padding:'8px 10px', borderRadius:'var(--r-md)',
+                        background:'var(--bg-elevated)',
+                      }}
+                    >
+                      <div style={{ display:'flex', alignItems:'center', gap: 8 }}>
+                        <span className={`mood-tag ${getMoodClass(item._id)}`} style={{ fontSize: 10.5 }}>{MOOD_LABELS[item._id] || item._id}</span>
+                        <span style={{ fontSize:13, color:'var(--text-muted)', textTransform:'capitalize' }}>{item._id}</span>
+                      </div>
+                      <span style={{ fontSize:13, fontWeight:600, color:'var(--text-body)' }}>×{item.count}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ fontSize:13, color:'var(--text-faint)', lineHeight:1.65 }}>
+                  Mood patterns appear after a few conversations.
                 </p>
-                <div className="mt-4 space-y-3">
-                  <div className="rounded-2xl bg-[#fff1eb] px-4 py-3">
-                    <p className="ui-sans text-xs font-semibold uppercase tracking-[0.2em] text-[#a64d2a]">Call or text</p>
-                    <p className="serif-display mt-1 text-3xl text-[#7d3419]">988</p>
-                    <p className="ui-sans mt-1 text-xs text-[#7a5b4c]">Suicide & Crisis Lifeline</p>
-                  </div>
-                  <div className="rounded-2xl bg-[#edf4ec] px-4 py-3">
-                    <p className="ui-sans text-sm font-semibold text-[#355146]">Crisis Text Line</p>
-                    <p className="ui-sans mt-1 text-sm text-[#5f4a3b]">
-                      Text <span className="font-semibold">HOME</span> to <span className="font-semibold">741741</span>
-                    </p>
-                  </div>
+              )}
+            </div>
+
+            <div style={{ borderTop:'1px solid var(--border-faint)' }} />
+
+            {/* Crisis */}
+            <div>
+              <SideLabel>Support now</SideLabel>
+              <div style={{ display:'flex', flexDirection:'column', gap: 9 }}>
+                <div style={{ padding:'12px 16px', borderRadius:'var(--r-md)', background:'rgba(200,168,130,0.08)', border:'1px solid rgba(200,168,130,0.18)' }}>
+                  <p className="t-label" style={{ color:'var(--accent)', marginBottom: 6, fontSize: 9.5 }}>Call or text</p>
+                  <p className="f-display" style={{ fontSize:30, color:'var(--text-primary)', lineHeight:1 }}>988</p>
+                  <p style={{ fontSize:12.5, color:'var(--text-muted)', marginTop:4 }}>Suicide & Crisis Lifeline</p>
+                </div>
+                <div style={{ padding:'10px 14px', borderRadius:'var(--r-md)', background:'var(--sage-bg)', border:'1px solid rgba(107,143,113,0.20)' }}>
+                  <p style={{ fontSize:13, fontWeight:600, color:'var(--sage-bright)', marginBottom:4 }}>Crisis Text Line</p>
+                  <p style={{ fontSize:13, color:'var(--text-muted)' }}>
+                    Text <strong style={{ color:'var(--text-body)' }}>HOME</strong> to <strong style={{ color:'var(--text-body)' }}>741741</strong>
+                  </p>
                 </div>
               </div>
             </div>
-          </aside>
-        </div>
+          </div>
+        </aside>
       </div>
+
+      <style>{`
+        @media (max-width: 1120px) {
+          .chat-layout { grid-template-columns: 240px minmax(0,1fr) !important; }
+          .right-panel { display: none !important; }
+        }
+        @media (max-width: 720px) {
+          .chat-layout { grid-template-columns: 1fr !important; }
+          .chat-sidebar { display: none !important; }
+          .mobile-tabs { display: flex !important; }
+        }
+        @media (min-width: 721px) {
+          .mobile-tabs { display: none !important; }
+        }
+      `}</style>
     </div>
   );
 };
