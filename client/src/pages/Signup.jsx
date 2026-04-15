@@ -195,7 +195,7 @@ const Signup = () => {
             Designed around your emotional reality.
           </h2>
           <p style={{ fontSize: 17, lineHeight: 1.75, color: 'var(--text-muted)', marginBottom: 48 }}>
-            Most tools are built for productivity. Solace is built for the moments when productivity is the last thing on your mind — when you need clarity, not another to-do list.
+            Most tools are built for productivity. Solace is built for the moments when productivity is the last thing on your mind  when you need clarity, not another to-do list.
           </p>
 
           {/* Quote-style feature blocks */}

@@ -4,7 +4,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import ChatBoxView from '../components/ChatBoxView';
 import { getChat, getChatHistory, getMoodHistory } from '../services/api';

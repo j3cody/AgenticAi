@@ -11,6 +11,7 @@ import Home from './pages/Home';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Chat from './pages/Chat.jsx';
+import MoodAnalytics from './pages/MoodAnalytics.jsx';
 import './index.css';
 
 /**
@@ -120,6 +121,18 @@ function App() {
               <ProtectedRoute>
                 <Layout>
                   <Home />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Mood Analytics route */}
+          <Route
+            path="/mood-analytics"
+            element={
+              <ProtectedRoute>
+                <Layout>
+                  <MoodAnalytics />
                 </Layout>
               </ProtectedRoute>
             }

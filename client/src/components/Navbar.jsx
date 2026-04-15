@@ -59,7 +59,7 @@ const Navbar = () => {
             <div>
               <span
                 className="f-display"
-                style={{ fontSize: 19, color: 'var(--text-primary)', letterSpacing: '-0.02em', lineHeight: 1 }}
+                style={{ fontSize: 26, color: 'var(--text-primary)', letterSpacing: '-0.02em', lineHeight: 1 }}
               >
                 Solace
               </span>
