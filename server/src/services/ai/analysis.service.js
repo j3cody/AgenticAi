@@ -12,6 +12,13 @@ const plannerService = require('./planner.service');
 const MOOD_CATEGORIES = moodService.MOOD_CATEGORIES;
 const RISK_LEVELS = Object.values(safetyService.RISK_LEVELS);
 const RESPONSE_STRATEGIES = Object.values(plannerService.RESPONSE_STRATEGIES);
+const RISK_PRIORITY = {
+  none: 0,
+  low: 1,
+  medium: 2,
+  high: 3,
+  crisis: 4
+};
 
 const ANALYSIS_SYSTEM_PROMPT = `You are a mental health triage and response-planning assistant.
 
@@ -73,11 +80,13 @@ const normalizeMoodResult = (result, message) => {
 const normalizeSafetyResult = (result) => {
   const normalizedLevel = String(result?.safety?.riskLevel || result?.riskLevel || 'none').toLowerCase();
   const riskLevel = RISK_LEVELS.includes(normalizedLevel) ? normalizedLevel : 'none';
+  const rawScore = Number(result?.safety?.riskScore ?? result?.riskScore ?? 0);
+  const riskScore = Math.max(0, Math.min(1, Number.isFinite(rawScore) ? rawScore : 0));
 
   return {
     success: true,
     riskLevel,
-    riskScore: Math.max(0, Math.min(1, Number(result?.safety?.riskScore ?? result?.riskScore ?? 0))),
+    riskScore,
     riskCategories: Array.isArray(result?.safety?.riskCategories) ? result.safety.riskCategories : [],
     triggerPhrases: Array.isArray(result?.safety?.triggerPhrases) ? result.safety.triggerPhrases : [],
     assessment: result?.safety?.assessment || 'Combined analysis result',
@@ -85,6 +94,44 @@ const normalizeSafetyResult = (result) => {
     source: 'combined_analysis',
     timestamp: new Date().toISOString()
   };
+};
+
+const mergeSafetySignals = (combinedSafety, heuristicSafety) => {
+  const combinedPriority = RISK_PRIORITY[combinedSafety?.riskLevel] ?? 0;
+  const heuristicPriority = RISK_PRIORITY[heuristicSafety?.riskLevel] ?? 0;
+
+  if (heuristicPriority > combinedPriority) {
+    return {
+      ...combinedSafety,
+      riskLevel: heuristicSafety.riskLevel,
+      riskScore: Math.max(combinedSafety?.riskScore || 0, heuristicSafety?.riskScore || 0),
+      riskCategories: heuristicSafety?.riskCategories?.length
+        ? heuristicSafety.riskCategories
+        : (combinedSafety?.riskCategories || []),
+      triggerPhrases: heuristicSafety?.triggerPhrases?.length
+        ? heuristicSafety.triggerPhrases
+        : (combinedSafety?.triggerPhrases || []),
+      assessment: heuristicSafety?.assessment || combinedSafety?.assessment,
+      immediateAction: Boolean(combinedSafety?.immediateAction || heuristicSafety?.immediateAction),
+      source: 'combined_analysis+heuristic_floor'
+    };
+  }
+
+  if (combinedPriority > 0 && (!combinedSafety.riskScore || combinedSafety.riskScore === 0)) {
+    const floorScore = {
+      low: 0.3,
+      medium: 0.5,
+      high: 0.8,
+      crisis: 1
+    }[combinedSafety.riskLevel] || 0;
+
+    return {
+      ...combinedSafety,
+      riskScore: floorScore
+    };
+  }
+
+  return combinedSafety;
 };
 
 const normalizePlanResult = (result, moodResult, safetyResult, message) => {
@@ -171,7 +218,9 @@ const analyzeMessage = async (message, conversationHistory = []) => {
     });
 
     const moodResult = normalizeMoodResult(analysis, message);
-    const safetyResult = normalizeSafetyResult(analysis);
+    const combinedSafetyResult = normalizeSafetyResult(analysis);
+    const heuristicSafetyResult = safetyService.fallbackSafetyCheck(message);
+    const safetyResult = mergeSafetySignals(combinedSafetyResult, heuristicSafetyResult);
     const planResult = normalizePlanResult(analysis, moodResult, safetyResult, message);
 
     if ((safetyResult.riskLevel === 'high' || safetyResult.riskLevel === 'crisis') && planResult.strategy !== 'crisis_intervention') {

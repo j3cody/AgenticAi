@@ -228,8 +228,8 @@ const fallbackSafetyCheck = (message) => {
   const keywordRisks = {
     crisis: ['suicide', 'kill myself', 'end my life', 'want to die', 'planning to die'],
     high: ['hurt myself', 'self-harm', 'cut myself', 'overdose', 'better off dead'],
-    medium: ['depressed', 'hopeless', 'no point', 'give up', 'can\'t go on'],
-    low: ['struggling', 'difficult time', 'hard right now']
+    medium: ['depressed', 'hopeless', 'no point', 'give up', 'can\'t go on', 'i feel unsafe', 'i am not safe'],
+    low: ['struggling', 'difficult time', 'hard right now', 'overwhelmed', 'panic', 'panicking', 'falling apart']
   };
 
   for (const [level, keywords] of Object.entries(keywordRisks)) {

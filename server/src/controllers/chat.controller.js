@@ -47,6 +47,10 @@ const sendMessage = async (req, res) => {
         mood: result.pipeline?.mood,
         safety: {
           riskLevel: result.pipeline?.safety?.riskLevel,
+          riskScore: result.pipeline?.safety?.riskScore,
+          assessment: result.pipeline?.safety?.assessment,
+          triggerPhrases: result.pipeline?.safety?.triggerPhrases,
+          riskCategories: result.pipeline?.safety?.riskCategories,
           needsAttention: result.requiresImmediateAttention || false
         },
         resources: result.resources,

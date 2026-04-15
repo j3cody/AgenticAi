@@ -104,7 +104,11 @@ const processMessage = async (userId, message, chatId = null) => {
         },
         safety: {
           riskLevel: safetyResult.riskLevel,
-          riskScore: safetyResult.riskScore
+          riskScore: safetyResult.riskScore,
+          riskCategories: safetyResult.riskCategories,
+          triggerPhrases: safetyResult.triggerPhrases,
+          assessment: safetyResult.assessment,
+          immediateAction: safetyResult.immediateAction
         },
         rag: {
           documentsFound: ragResult.relevantDocs.length,
